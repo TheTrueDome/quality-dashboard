@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import io
 
+#Jetzt mit Git-Anbindung - diese Zeile dient zur Überprüfung
+
 def draw_ishikawa(ax, problem,kategorien_oben, kategorien_unten):
     ax.set_xlim(0,10)
     ax.set_ylim(0,7)
