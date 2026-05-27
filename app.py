@@ -3,8 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import io
-
-#Jetzt mit Git-Anbindung - diese Zeile dient zur Überprüfung
+import openpyxl
 
 def draw_ishikawa(ax, problem,kategorien_oben, kategorien_unten):
     ax.set_xlim(0,10)
@@ -79,7 +78,7 @@ st.set_page_config(page_title="Quality Dashboard", layout="wide")
 st.title("Quality Dashboard")
 
 # --- Tabs ---
-tab1, tab2, tab3 = st.tabs(["Pareto-Analyse", "SPC-Karte", "Ishikawa-Diagramm"])
+tab1, tab2, tab3 , tab4 = st.tabs(["Pareto-Analyse", "SPC-Karte", "Ishikawa-Diagramm", "FMEA"])
 
 # === TAB 1: PARETO ===
 with tab1:
@@ -230,3 +229,85 @@ with tab3:
         data=buf,
         file_name=f"Ishikawa_{problem}.png",
         mime="image/png")
+
+# === TAB 4: FMEA ===
+
+with tab4:
+    st.subheader("FMEA – Fehlermöglichkeits- und Einflussanalyse")
+
+    # ── Standardtabelle als Startpunkt ────────────────────────────────────────
+
+    default_data = pd.DataFrame({
+        "Fehlerart":     ["Maßabweichung", "Oberflächenfehler", "Falsche Beschriftung"],
+        "Mögliche Ursache": ["Werkzeugverschleiß", "Verunreinigung", "Druckerfehler"],
+        "Auswirkung":    ["Ausschuss", "Optischer Mangel", "Falsche Verwendung"],
+        "S (Schwere)":   [8, 5, 7],
+        "O (Auftreten)": [4, 6, 3],
+        "D (Entdeckung)":[3, 4, 5],
+    })
+
+    st.markdown("**Tabelle direkt bearbeiten** – Werte in die Zellen tippen, RPN wird automatisch berechnet:")
+
+    # ── Editierbare Tabelle ───────────────────────────────────────────────────
+    edited_df = st.data_editor(
+        default_data,
+        num_rows="dynamic",       # Zeilen hinzufügen / löschen möglich
+        width='stretch',
+        column_config={
+            "S (Schwere)":    st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
+            "O (Auftreten)":  st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
+            "D (Entdeckung)": st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
+        }
+    )
+
+    # ── RPN berechnen ─────────────────────────────────────────────────────────
+    edited_df["RPN"] = (
+        edited_df["S (Schwere)"] *
+        edited_df["O (Auftreten)"] *
+        edited_df["D (Entdeckung)"]
+    )
+
+    # ── Nach RPN absteigend sortieren ─────────────────────────────────────────
+    result_df = edited_df.dropna(subset=["RPN"]).sort_values("RPN", ascending=False).reset_index(drop=True)
+    
+    # ── Farbkodierung ─────────────────────────────────────────────────────────
+    def farbe_rpn(val):
+        if val >= 200:
+            return "background-color: #FFCCCC"   # rot – kritisch
+        elif val >= 100:
+            return "background-color: #FFF3CC"   # gelb – erhöht
+        else:
+            return "background-color: #CCFFCC"   # grün – unkritisch
+
+    styled = result_df.style.map(farbe_rpn, subset=["RPN"])
+
+    st.subheader("Ergebnis – sortiert nach RPN")
+    st.dataframe(styled, width='stretch')
+
+    # ── KPI-Zeile ─────────────────────────────────────────────────────────────
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Höchster RPN",  int(result_df["RPN"].max()))
+    col2.metric("Ø RPN",         round(result_df["RPN"].mean(), 1))
+    col3.metric("Kritische Punkte (RPN ≥ 200)",
+                int((result_df["RPN"] >= 200).sum()))
+
+    # ── Warnung ───────────────────────────────────────────────────────────────
+    if (result_df["RPN"] >= 200).any():
+        st.error("🔴 Mindestens ein Risiko ist kritisch (RPN ≥ 200) – sofortige Maßnahme erforderlich.")
+    elif (result_df["RPN"] >= 100).any():
+        st.warning("🟡 Erhöhte Risiken vorhanden (RPN ≥ 100) – Maßnahmen prüfen.")
+    else:
+        st.success("🟢 Alle Risiken im unkritischen Bereich.")
+
+    # ── Excel-Export ──────────────────────────────────────────────────────────
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        result_df.to_excel(writer, index=False, sheet_name="FMEA")
+    buffer.seek(0)
+
+    st.download_button(
+        label="📥 FMEA als Excel exportieren",
+        data=buffer,
+        file_name="FMEA_Auswertung.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
